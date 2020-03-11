@@ -6,7 +6,7 @@ import random
 import sys
 # 测试数据：随机a, [b, c], 要测试y=a+b+c的函数
 corpus = []
-for i in range(2000):
+for i in range(100):
 	a = random.random()*2000
 	b = random.random()*2000
 	c = random.random()*2000
@@ -38,3 +38,4 @@ for data_test in test_reader():
 	for x3, x2 in data_test:
 		indx += 1
 		print("%.4f+%.4f+%.4f=%.4f" % (x3, x2[0], x2[1], results[0][indx]))
+	print("-------------------")
