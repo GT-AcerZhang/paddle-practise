@@ -1,2 +1,0 @@
-# paddle-practise
-paddle practise
