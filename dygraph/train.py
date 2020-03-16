@@ -1,77 +1,10 @@
+import sys
+import time
 import paddle
 import paddle.fluid as fluid
 import numpy as np
+from MNIST import *
 
-class SimpleImgConvPool(fluid.dygraph.Layer):
-	def __init__(self,
-			num_channels,
-			num_filters,
-			filter_size,
-			pool_size,
-			pool_stride,
-			pool_padding=0,
-			pool_type='max',
-			global_pooling=False,
-			conv_stride=1,
-			conv_padding=0,
-			conv_dilation=1,
-			conv_groups=1,
-			act=None,
-			use_cudnn=False,
-			param_attr=None,
-			bias_attr=None):
-		super(SimpleImgConvPool, self).__init__()
-
-		self._conv2d = fluid.dygraph.Conv2D(
-			num_channels=num_channels,
-			num_filters=num_filters,
-			filter_size=filter_size,
-			stride=conv_stride,
-			padding=conv_padding,
-			dilation=conv_dilation,
-			groups=conv_groups,
-			param_attr=param_attr,
-			bias_attr=bias_attr,
-			act=act,
-			use_cudnn=use_cudnn)
-		self._pool2d = fluid.dygraph.Pool2D(
-			pool_size=pool_size,
-			pool_type=pool_type,
-			pool_stride=pool_stride,
-			pool_padding=pool_padding,
-			global_pooling=global_pooling,
-			use_cudnn=use_cudnn)
-	def forward(self, inputs):
-		x = self._conv2d(inputs)
-		x = self._pool2d(x)
-		return x
-class MNIST(fluid.dygraph.Layer):
-	def __init__(self):
-		super(MNIST, self).__init__()
-		self._simple_img_conv_pool_1 = SimpleImgConvPool(
-			1, 20, 5, 2, 2, act="relu")
-		self._simple_img_conv_pool_2 = SimpleImgConvPool(
-			20, 50, 5, 2, 2, act="relu")
-		self.pool_2_shape = 50 * 4 * 4
-		SIZE = 10
-		scale = (2.0/(self.pool_2_shape**2 * SIZE))**0.5
-		self._fc = fluid.dygraph.Linear(
-			self.pool_2_shape,
-			10,
-			param_attr=fluid.param_attr.ParamAttr(
-				initializer=fluid.initializer.NormalInitializer(
-					loc=0.0, scale=scale)),
-				act="softmax")
-	def forward(self, inputs, label=None):
-		x = self._simple_img_conv_pool_1(inputs)
-		x = self._simple_img_conv_pool_2(x)
-		x = fluid.layers.reshape(x, shape=[-1, self.pool_2_shape])
-		x = self._fc(x)
-		if label is not None:
-			acc = fluid.layers.accuracy(input=x, label=label)
-			return x, acc
-		else:
-			return x
 def checkData():
 	print("checkData......................................")
 	with fluid.dygraph.guard():
@@ -158,7 +91,7 @@ def train2():
 		#print("_simple_img_conv_pool_1_conv2d Bias's mean is: {}".format(mnist._simple_img_conv_pool_1._conv2d._bias_param.numpy().mean()))
 def train3():
 	print("train3........................................")
-	print("\t多卡训练")
+	print("\t多卡训练（paddle有bug，没有调试通）")
 	place = fluid.CUDAPlace(fluid.dygraph.parallel.Env().dev_id)
 	with fluid.dygraph.guard(place):
 		strategy = fluid.dygraph.parallel.prepare_context()
@@ -195,8 +128,77 @@ def train3():
 				mnist.clear_gradients()
 				if batch_id%100 == 0 and batch_id is not 0:
 					print("epoch: {}, batch_id: {}, loss is: {}".format(epoch, batch_id, avg_loss.numpy()))
+def test(reader, model, batch_size):
+	acc_set = []
+	avg_loss_set = []
+	for batch_id, data in enumerate(reader()):
+		dy_x_data = np.array([x[0].reshape(1, 28, 28) for x in data]).astype('float32')
+		y_data = np.array([x[1] for x in data]).astype('int64').reshape(batch_size, 1)
+		img = fluid.dygraph.to_variable(dy_x_data)
+		label = fluid.dygraph.to_variable(y_data)
+		label.stop_gradient = True
+
+		prediction, acc = model(img, label)
+		
+		loss = fluid.layers.cross_entropy(input=prediction, label=label)
+		avg_loss = fluid.layers.mean(loss)
+		avg_loss_set.append(float(avg_loss.numpy()))
+		acc_set.append(float(acc.numpy()))
+	acc_val_mean = np.array(acc_set).mean()
+	avg_loss_val_mean = np.array(avg_loss_set).mean()
+
+	return avg_loss_val_mean, acc_val_mean
+def train4(model_file):
+	with fluid.dygraph.guard():
+		epoch_num = 5
+		BATCH_SIZE = 64
+
+		mnist = MNIST()
+		adam = fluid.optimizer.Adam(learning_rate=0.001, parameter_list=mnist.parameters())
+		train_reader = paddle.batch(
+			paddle.dataset.mnist.train(), batch_size=BATCH_SIZE, drop_last=True)
+		test_reader = paddle.batch(
+			paddle.dataset.mnist.test(), batch_size=BATCH_SIZE, drop_last=True)
+
+		np.set_printoptions(precision=3, suppress=True)
+		dy_param_init_value = {}
+		for epoch in range(epoch_num):
+			for batch_id, data in enumerate(train_reader()):
+				# step 1 : 处理输入
+				dy_x_data = np.array(
+					[x[0].reshape(1, 28, 28) for x in data]).astype('float32')
+				y_data = np.array(
+					[x[1] for x in data]).astype('int64').reshape(BATCH_SIZE, 1)
+				img = fluid.dygraph.to_variable(dy_x_data)
+				label = fluid.dygraph.to_variable(y_data)
+				label.stop_gradient = True
+
+				# step 2 : 前向传播&&损失函数
+				cost = mnist(img)
+				loss = fluid.layers.cross_entropy(cost, label)
+				avg_loss = fluid.layers.mean(loss)
+				dy_out = avg_loss.numpy()
+
+				# step 3 : 反向传播&&最优化
+				avg_loss.backward()
+				adam.minimize(avg_loss)
+				mnist.clear_gradients()
+				# step 4 : 测试模型
+				if batch_id%100 == 0 and batch_id is not 0:
+					mnist.eval()
+					test_cost, test_acc = test(test_reader, mnist, BATCH_SIZE)
+					mnist.train()
+					print("epoch {}, batch_id {}, train loss is {}, test cost is {}, test acc is {}".format(
+						epoch, batch_id, avg_loss.numpy(), test_cost, test_acc))
+		fluid.dygraph.save_dygraph(mnist.state_dict(), model_file)
 if __name__ == "__main__":
+	try:
+		model_file = sys.argv[1]
+	except:
+		sys.stderr.write("\tpython "+sys.argv[0]+" model_file\n")
+		sys.exit(-1)
 	#checkData()
 	#train1()
 	#train2()
-	train3()
+	#train3()
+	train4(model_file)
