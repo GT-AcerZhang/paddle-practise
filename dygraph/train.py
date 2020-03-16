@@ -89,7 +89,7 @@ def train2():
 		print("Final loss : {}".format(avg_loss.numpy()))
 		#print("_simple_img_conv_pool_1_conv2d W's mean is: {}".format(mnist._simple_img_conv_pool_1._conv2d._filter_param.numpy().mean()))
 		#print("_simple_img_conv_pool_1_conv2d Bias's mean is: {}".format(mnist._simple_img_conv_pool_1._conv2d._bias_param.numpy().mean()))
-def train3():
+def train3(use_cudnn, model_file):
 	print("train3........................................")
 	print("\t多卡训练（paddle有bug，没有调试通）")
 	place = fluid.CUDAPlace(fluid.dygraph.parallel.Env().dev_id)
@@ -97,7 +97,7 @@ def train3():
 		strategy = fluid.dygraph.parallel.prepare_context()
 		epoch_num = 5
 		BATCH_SIZE = 64
-		mnist = MNIST()
+		mnist = MNIST(use_cudnn=use_cudnn)
 		adam = fluid.optimizer.AdamOptimizer(learning_rate=0.001, parameter_list=mnist.parameters())
 		mnist = fluid.dygraph.parallel.DataParallel(mnist, strategy)
 
@@ -105,6 +105,7 @@ def train3():
 			paddle.dataset.mnist.train(), batch_size=BATCH_SIZE, drop_last=True)
 		train_reader = fluid.contrib.reader.distributed_batch_reader(train_reader)
 
+		start_time = time.time()
 		for epoch in range(epoch_num):
 			for batch_id, data in enumerate(train_reader()):
 				dy_x_data = np.array(
@@ -128,6 +129,9 @@ def train3():
 				mnist.clear_gradients()
 				if batch_id%100 == 0 and batch_id is not 0:
 					print("epoch: {}, batch_id: {}, loss is: {}".format(epoch, batch_id, avg_loss.numpy()))
+		fluid.dygraph.save_dygraph(mnist.state_dict(), model_file)
+		end_time = time.time()
+		print("training model has finished! time=%.2fs" % (end_time - start_time))
 def test(reader, model, batch_size):
 	acc_set = []
 	avg_loss_set = []
@@ -148,12 +152,12 @@ def test(reader, model, batch_size):
 	avg_loss_val_mean = np.array(avg_loss_set).mean()
 
 	return avg_loss_val_mean, acc_val_mean
-def train4(model_file):
+def train4(use_cudnn, model_file):
 	with fluid.dygraph.guard():
 		epoch_num = 5
 		BATCH_SIZE = 64
 
-		mnist = MNIST()
+		mnist = MNIST(use_cudnn=use_cudnn)
 		adam = fluid.optimizer.Adam(learning_rate=0.001, parameter_list=mnist.parameters())
 		train_reader = paddle.batch(
 			paddle.dataset.mnist.train(), batch_size=BATCH_SIZE, drop_last=True)
@@ -196,12 +200,21 @@ def train4(model_file):
 		print("training model has finished! time=%.2fs" % (end_time - start_time))
 if __name__ == "__main__":
 	try:
-		model_file = sys.argv[1]
+		ctype      = sys.argv[1]
+		model_file = sys.argv[2]
 	except:
-		sys.stderr.write("\tpython "+sys.argv[0]+" model_file\n")
+		sys.stderr.write("\tpython "+sys.argv[0]+" cpu|onegpu|multigpu model_file\n")
 		sys.exit(-1)
 	#checkData()
 	#train1()
 	#train2()
-	#train3()
-	train4(model_file)
+	#train3(True, model_file)
+	if ctype == "cpu":
+		train4(False, model_file)
+	elif ctype == "onegpu":
+		train4(True, model_file)
+	elif ctype == "multigpu":
+		train3(True, model_file)
+	else:
+		sys.stderr.write("\tpython "+sys.argv[0]+" cpu|onegpu|twogpu model_file\n")
+		sys.exit(-1)

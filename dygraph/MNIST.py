@@ -45,12 +45,12 @@ class SimpleImgConvPool(fluid.dygraph.Layer):
 		x = self._pool2d(x)
 		return x
 class MNIST(fluid.dygraph.Layer):
-	def __init__(self):
+	def __init__(self, use_cudnn=False):
 		super(MNIST, self).__init__()
 		self._simple_img_conv_pool_1 = SimpleImgConvPool(
-			1, 20, 5, 2, 2, act="relu")
+			1, 20, 5, 2, 2, act="relu", use_cudnn=use_cudnn)
 		self._simple_img_conv_pool_2 = SimpleImgConvPool(
-			20, 50, 5, 2, 2, act="relu")
+			20, 50, 5, 2, 2, act="relu", use_cudnn=use_cudnn)
 		self.pool_2_shape = 50 * 4 * 4
 		SIZE = 10
 		scale = (2.0/(self.pool_2_shape**2 * SIZE))**0.5
