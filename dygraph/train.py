@@ -162,6 +162,7 @@ def train4(model_file):
 
 		np.set_printoptions(precision=3, suppress=True)
 		dy_param_init_value = {}
+		start_time = time.time()
 		for epoch in range(epoch_num):
 			for batch_id, data in enumerate(train_reader()):
 				# step 1 : 处理输入
@@ -191,6 +192,8 @@ def train4(model_file):
 					print("epoch {}, batch_id {}, train loss is {}, test cost is {}, test acc is {}".format(
 						epoch, batch_id, avg_loss.numpy(), test_cost, test_acc))
 		fluid.dygraph.save_dygraph(mnist.state_dict(), model_file)
+		end_time = time.time()
+		print("training model has finished! time=%.2fs" % (end_time - start_time))
 if __name__ == "__main__":
 	try:
 		model_file = sys.argv[1]
