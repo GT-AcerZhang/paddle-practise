@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 from sklearn.externals import joblib
+from sklearn import model_selection
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 def iris_type(s):
@@ -49,6 +50,9 @@ data = np.loadtxt(corpus_file, dtype=float, delimiter=',', converters={4:iris_ty
 x, y = np.split(data, (4,), axis=1)
 #取前两维特征
 x = x[:, 0:2]
+#划分训练集与测试集
+x_train, x_test, y_train, y_test = model_selection.train_test_split(
+	x, y, random_state=1, test_size=0.3)
 #载入模型
 clf = joblib.load(model_file)
 #画图
